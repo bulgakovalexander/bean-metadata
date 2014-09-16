@@ -27,7 +27,9 @@ import static javax.tools.Diagnostic.Kind.WARNING;
 @SupportedAnnotationTypes({"*"/*,"javax.persistence.*", "org.hibernate.annotations.*"*/})
 public class BeanMetadataGenerator extends AbstractProcessor {
     public static final String PREFIX = "P";
+    public static final String STATIC_PREFIX = "S";
     private static final String BASE_CLASS = PREFIX + Object.class.getSimpleName();
+    private static final String WRAP_METHOD = "w";
     private String intend = "    ";
     private static final String JAVA_LANG = "java.lang";
 
@@ -54,11 +56,17 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     }
 
     public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties) {
+        generate(classElement, elements, properties, false);
+        generate(classElement, elements, properties, true);
+    }
+
+    public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties, boolean isStatic) {
         Name className = classElement.getSimpleName();
         PackageElement packageElement = (PackageElement) classElement.getEnclosingElement();
         Name pkgName = packageElement.getQualifiedName();
         Filer processingEnvFiler = processingEnv.getFiler();
-        String metadataClassName = PREFIX + className;
+        String prefix = isStatic ? STATIC_PREFIX : PREFIX;
+        String metadataClassName = prefix + className;
         BufferedWriter bw = null;
         try {
             processingEnv.getMessager().printMessage(WARNING,
@@ -92,11 +100,12 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             } else bw.append(JAVA_LANG + "." + BASE_CLASS);
             bw.append(" {");
             bw.newLine();
-            bw.append(intend).append("public ").append(metadataClassName).append("(String parent) { super(parent); }");
-            bw.newLine();
-            bw.append(intend).append("public ").append(metadataClassName).append("() { super(); }");
-            bw.newLine();
-
+            if (!isStatic) {
+                bw.append(intend).append("public ").append(metadataClassName).append("(String parent) { super(parent); }");
+                bw.newLine();
+                bw.append(intend).append("public ").append(metadataClassName).append("() { super(); }");
+                bw.newLine();
+            }
 
             bw.newLine();
             for (String result : properties.keySet()) {
@@ -105,16 +114,17 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                 if (elem != null) {
                     String type = metadataName(elem);
                     _prop = type + " " + result + " = new " + type + "(\"" + result + "\");";
-                } else _prop = "CharSequence " + result + " = \"" + result + "\";";
-                //bw.append(intend).append("public final static " + _prop);
-                bw.append(intend).append("public final " + _prop);
+                } else _prop = "String " + result + " = " + w(result, !isStatic) + ";";
+                bw.append(intend).append("public final ");
+                if (isStatic) bw.append("static ");
+                bw.append(_prop);
                 bw.newLine();
             }
 
-            bw.append(intend).append("public static final " + metadataClassName + " "
-                    + onlyUps(className.toString()).toLowerCase()
-                    + " = new " + metadataClassName + "();");
-            ;
+//            if (!isStatic) bw.append(intend).append("public static final ")
+//                    .append(metadataClassName).append(" ").append(onlyUps(className.toString()).toLowerCase())
+//                    .append(" = new ").append(metadataClassName).append("();");
+
             bw.newLine();
             bw.append("}");
 
@@ -127,6 +137,10 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                 e1.printStackTrace();
             }
         }
+    }
+
+    private String w(String result, boolean wrap) {
+        return wrap ? WRAP_METHOD + "(\"" + result + "\")" : "\"" + result + "\"";
     }
 
     private String onlyUps(String className) {
@@ -172,7 +186,8 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.append(intend).append("public String toString() { return BASE_PREFIX; }");
             bw.newLine();
 
-            bw.append(intend).append("public CharSequence c(CharSequence p) { return BASE_PREFIX != null ? BASE_PREFIX +\".\" + p: p; }");
+            bw.append(intend).append("public String " + WRAP_METHOD
+                    + "(String p) { return BASE_PREFIX != null ? BASE_PREFIX +\".\" + p: p; }");
             bw.newLine();
             bw.append("}");
         } catch (IOException e) {
