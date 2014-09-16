@@ -186,7 +186,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.append(intend).append("public String toString() { return BASE_PREFIX; }");
             bw.newLine();
 
-            bw.append(intend).append("public String " + WRAP_METHOD
+            bw.append(intend).append("public final String " + WRAP_METHOD
                     + "(String p) { return BASE_PREFIX != null ? BASE_PREFIX +\".\" + p: p; }");
             bw.newLine();
             bw.append("}");
