@@ -30,7 +30,8 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     public static final String STATIC_PREFIX = "S";
     private static final String BASE_CLASS = PREFIX + Object.class.getSimpleName();
     private static final String WRAP_METHOD = "w";
-    private static final String PARENT_PREFIX = "PARENT_PREFIX";
+    private static final String _PREFIX = "_PREFIX";
+    private static final String PARENT = "parent";
     private String intend = "    ";
     private static final String JAVA_LANG = "javax.metadata";
 
@@ -78,6 +79,8 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.append("package ").append(pkgName).append(";");
             bw.newLine();
 
+            bw.append("import " + JAVA_LANG + "." + BASE_CLASS + ";");
+            bw.newLine();
             for (TypeElement elem : properties.values())
                 if (elem != null) {
                     bw.append("import " + qualifiedMetadataName(elem, false) + ";");
@@ -103,7 +106,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.newLine();
             if (!isStatic) {
                 bw.append(intend).append("public ").append(metadataClassName)
-                        .append("(String parent) { super(parent); }");
+                        .append("(String prefix, " + BASE_CLASS + " parent) { super(prefix, parent); }");
                 bw.newLine();
                 bw.append(intend).append("protected ").append(metadataClassName).append("() { super(); }");
                 bw.newLine();
@@ -115,7 +118,8 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
                 if (elem != null) {
                     String type = metadataName(elem, false);
-                    String _method = type + " " + result + "() { return " + " new " + type + "(\"" + result + "\"); }";
+                    String _method = type + " " + result + "() { return " + " new " + type + "(\"" + result + "\", "
+                            + (isStatic ? "null" : "this") + "); }";
                     bw.append(intend).append("public ");
                     if (isStatic) bw.append("static ");
                     bw.append(_method);
@@ -176,25 +180,45 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.append("public class " + metadataClassName + " implements CharSequence {");
 
             bw.newLine();
-            bw.append(intend).append("protected final String " + PARENT_PREFIX + ";");
+            bw.append(intend).append("protected final String " + _PREFIX + ";");
+            bw.append(intend).append("protected final " + metadataClassName + " " + PARENT + ";");
             bw.newLine();
-            bw.append(intend).append("public ").append(metadataClassName).append("(String parent) { " + PARENT_PREFIX + " = parent; }");
+            bw.append(intend).append("public ").append(metadataClassName).append("(String prefix, "
+                    + metadataClassName + " parent) { \n" +
+                    intend + "this." + _PREFIX + " = prefix;\n" +
+                    intend + "this." + PARENT + " = parent;\n" +
+                    " }");
             bw.newLine();
-            bw.append(intend).append("public ").append(metadataClassName).append("() { " + PARENT_PREFIX + " = \"\"; }");
-            bw.newLine();
-
-            bw.append(intend).append("public int length() { return " + PARENT_PREFIX + ".length(); }");
-            bw.newLine();
-            bw.append(intend).append("public char charAt(int index) { return " + PARENT_PREFIX + ".charAt(index); }");
-            bw.newLine();
-            bw.append(intend).append("public CharSequence subSequence(int start, int end) { return " + PARENT_PREFIX + ".subSequence(start, end); }");
-            bw.newLine();
-
-            bw.append(intend).append("public String toString() { return " + PARENT_PREFIX + "; }");
+            bw.append(intend).append("public ").append(metadataClassName).append("() { \n" +
+                    intend + "this." + _PREFIX + " = \"\";\n" +
+                    intend + "this." + PARENT + " = null;\n" +
+                    " }");
             bw.newLine();
 
-            bw.append(intend).append("public final String " + WRAP_METHOD
-                    + "(String p) { return " + PARENT_PREFIX + " != null ? " + PARENT_PREFIX + " +\".\" + p: p; }");
+            bw.append(intend).append("public int length() { return " + _PREFIX + ".length(); }");
+            bw.newLine();
+            bw.append(intend).append("public char charAt(int index) { return " + _PREFIX + ".charAt(index); }");
+            bw.newLine();
+            bw.append(intend).append("public CharSequence subSequence(int start, int end) { return " + _PREFIX + ".subSequence(start, end); }");
+            bw.newLine();
+
+            bw.append(intend).append("public String toString() { return " + _PREFIX + "; }");
+            bw.newLine();
+
+//            bw.append(intend).append("public final String " + WRAP_METHOD
+//                    + "(String p) { return " + _PREFIX + " != null ? " + _PREFIX + " +\".\" + p: p; }");
+
+
+            bw.newLine();
+            bw.append("    public final String w(String propName) {\n" +
+                    "        PObject parent = this.parent;\n" +
+                    "        StringBuilder prnt = new StringBuilder();\n" +
+                    "        while (parent != null) {\n" +
+                    "            prnt.append(parent._PREFIX).append(\".\");\n" +
+                    "            parent = parent.parent;\n" +
+                    "        }\n" +
+                    "        return prnt.toString() + (_PREFIX != null ? _PREFIX + \".\" + propName : propName);\n" +
+                    "    }");
             bw.newLine();
             bw.append("}");
         } catch (IOException e) {
