@@ -30,8 +30,10 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     public static final String STATIC_PREFIX = "S";
     private static final String BASE_CLASS = PREFIX + Object.class.getSimpleName();
     private static final String WRAP_METHOD = "w";
+    private static final String PARENT_PREFIX = "PARENT_PREFIX";
     private String intend = "    ";
-    private static final String JAVA_LANG = "java.lang";
+    private static final String JAVA_LANG = "javax.metadata";
+
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
@@ -47,7 +49,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         Set<? extends Element> elements = roundEnv.getRootElements();
         for (Element e : elements)
             if (asList(CLASS, INTERFACE).contains(e.getKind()))
-                generate((TypeElement) e, elements, properties(e, elements));
+                generate((TypeElement) e, elements, properties((TypeElement) e, elements));
 
         generateBaseClass();
 
@@ -78,7 +80,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
             for (TypeElement elem : properties.values())
                 if (elem != null) {
-                    bw.append("import " + qualifiedMetadataName(elem) + ";");
+                    bw.append("import " + qualifiedMetadataName(elem, false) + ";");
                     bw.newLine();
                 }
 
@@ -91,30 +93,35 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
             bw.append("public class ").append(metadataClassName);
             bw.append(" extends ");
-            if (superClass != null) {
-                TypeElement superElem = (TypeElement) superClass.asElement();
-
-
-                if (elements.contains(superElem)) bw.append(qualifiedMetadataName(superElem));
-                else bw.append(JAVA_LANG + "." + BASE_CLASS);
-            } else bw.append(JAVA_LANG + "." + BASE_CLASS);
+//            if (superClass != null) {
+//                TypeElement superElem = (TypeElement) superClass.asElement();
+//                if (elements.contains(superElem)) bw.append(qualifiedMetadataName(superElem, isStatic));
+//                else bw.append(JAVA_LANG + "." + BASE_CLASS);
+//            } else
+            bw.append(JAVA_LANG + "." + BASE_CLASS);
             bw.append(" {");
             bw.newLine();
             if (!isStatic) {
-                bw.append(intend).append("public ").append(metadataClassName).append("(String parent) { super(parent); }");
+                bw.append(intend).append("public ").append(metadataClassName)
+                        .append("(String parent) { super(parent); }");
                 bw.newLine();
-                bw.append(intend).append("public ").append(metadataClassName).append("() { super(); }");
+                bw.append(intend).append("protected ").append(metadataClassName).append("() { super(); }");
                 bw.newLine();
             }
 
             bw.newLine();
             for (String result : properties.keySet()) {
                 TypeElement elem = properties.get(result);
-                String _prop;
+
                 if (elem != null) {
-                    String type = metadataName(elem);
-                    _prop = type + " " + result + " = new " + type + "(\"" + result + "\");";
-                } else _prop = "String " + result + " = " + w(result, !isStatic) + ";";
+                    String type = metadataName(elem, false);
+                    String _method = type + " " + result + "() { return " + " new " + type + "(\"" + result + "\"); }";
+                    bw.append(intend).append("public ");
+                    if (isStatic) bw.append("static ");
+                    bw.append(_method);
+                    bw.newLine();
+                }
+                String _prop = "String " + result + " = " + w(result, !isStatic) + ";";
                 bw.append(intend).append("public final ");
                 if (isStatic) bw.append("static ");
                 bw.append(_prop);
@@ -169,25 +176,25 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.append("public class " + metadataClassName + " implements CharSequence {");
 
             bw.newLine();
-            bw.append(intend).append("private final String BASE_PREFIX;");
+            bw.append(intend).append("protected final String " + PARENT_PREFIX + ";");
             bw.newLine();
-            bw.append(intend).append("public ").append(metadataClassName).append("(String parent) { BASE_PREFIX = parent; }");
+            bw.append(intend).append("public ").append(metadataClassName).append("(String parent) { " + PARENT_PREFIX + " = parent; }");
             bw.newLine();
-            bw.append(intend).append("public ").append(metadataClassName).append("() { BASE_PREFIX = \"\"; }");
-            bw.newLine();
-
-            bw.append(intend).append("public int length() { return BASE_PREFIX.length(); }");
-            bw.newLine();
-            bw.append(intend).append("public char charAt(int index) { return BASE_PREFIX.charAt(index); }");
-            bw.newLine();
-            bw.append(intend).append("public CharSequence subSequence(int start, int end) { return BASE_PREFIX.subSequence(start, end); }");
+            bw.append(intend).append("public ").append(metadataClassName).append("() { " + PARENT_PREFIX + " = \"\"; }");
             bw.newLine();
 
-            bw.append(intend).append("public String toString() { return BASE_PREFIX; }");
+            bw.append(intend).append("public int length() { return " + PARENT_PREFIX + ".length(); }");
+            bw.newLine();
+            bw.append(intend).append("public char charAt(int index) { return " + PARENT_PREFIX + ".charAt(index); }");
+            bw.newLine();
+            bw.append(intend).append("public CharSequence subSequence(int start, int end) { return " + PARENT_PREFIX + ".subSequence(start, end); }");
+            bw.newLine();
+
+            bw.append(intend).append("public String toString() { return " + PARENT_PREFIX + "; }");
             bw.newLine();
 
             bw.append(intend).append("public final String " + WRAP_METHOD
-                    + "(String p) { return BASE_PREFIX != null ? BASE_PREFIX +\".\" + p: p; }");
+                    + "(String p) { return " + PARENT_PREFIX + " != null ? " + PARENT_PREFIX + " +\".\" + p: p; }");
             bw.newLine();
             bw.append("}");
         } catch (IOException e) {
@@ -201,12 +208,12 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         }
     }
 
-    public String metadataName(TypeElement elem) {
-        return PREFIX + elem.getSimpleName().toString();
+    public String metadataName(TypeElement elem, boolean isStatic) {
+        return (isStatic ? STATIC_PREFIX : PREFIX) + elem.getSimpleName().toString();
     }
 
-    public String qualifiedMetadataName(TypeElement elem) {
-        return packageName(elem) + "." + metadataName(elem);
+    public String qualifiedMetadataName(TypeElement elem, boolean isStatic) {
+        return packageName(elem) + "." + metadataName(elem, isStatic);
     }
 
     public String packageName(TypeElement elem) {
@@ -215,9 +222,25 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         return q.substring(0, q.length() - s.length() - 1);
     }
 
-    public static Map<String, TypeElement> properties(Element e, Set<? extends Element> elements) {
+    public static Map<String, TypeElement> properties(TypeElement e, Set<? extends Element> elements) {
         Map<String, TypeElement> properties = new LinkedHashMap<String, TypeElement>();
-        for (Element childE : e.getEnclosedElements()) {
+        populate(properties, e, elements);
+        TypeMirror sup = e.getSuperclass();
+        while (sup instanceof DeclaredType) {
+            DeclaredType sdt = (DeclaredType) sup;
+            Element superE = sdt.asElement();
+            if (superE != null && superE instanceof TypeElement
+                    && !((TypeElement) superE).getQualifiedName().toString().equals(Object.class.getName())) {
+                populate(properties, (TypeElement) superE, elements);
+                sup = ((TypeElement) superE).getSuperclass();
+            } else sup = null;
+        }
+        return properties;
+    }
+
+    public static void populate(Map<String, TypeElement> properties, TypeElement byElement, Set<? extends Element> elements) {
+        for (Element childE : byElement.getEnclosedElements()) {
+
             Set<Modifier> modifiers = childE.getModifiers();
             boolean isPublic = modifiers.contains(PUBLIC);
             boolean isStatic = modifiers.contains(STATIC);
@@ -251,7 +274,6 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                 }
             }
         }
-        return properties;
     }
 
     public static String decapitalize(String name) {
