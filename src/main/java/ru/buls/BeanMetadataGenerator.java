@@ -6,6 +6,7 @@ import javax.lang.model.type.*;
 import javax.tools.JavaFileObject;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -24,7 +25,7 @@ import static javax.tools.Diagnostic.Kind.WARNING;
  * Created by alexander on 14.09.14.
  */
 @SupportedSourceVersion(RELEASE_5)
-@SupportedAnnotationTypes({"*"/*,"javax.persistence.*", "org.hibernate.annotations.*"*/})
+@SupportedAnnotationTypes({"*"})
 public class BeanMetadataGenerator extends AbstractProcessor {
     public static final String PREFIX = "P";
     public static final String STATIC_PREFIX = "S";
@@ -35,10 +36,19 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     private String intend = "    ";
     private static final String JAVA_LANG = "javax.metadata";
 
+    String filter = null;
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
         super.init(processingEnv);
+        this.filter = processingEnv.getOptions().get("filter");
+    }
+
+    @Override
+    public Set<String> getSupportedAnnotationTypes() {
+        return (filter != null)
+                ? new HashSet<String>(asList(filter))
+                : super.getSupportedAnnotationTypes();
     }
 
     @Override
