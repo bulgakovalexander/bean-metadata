@@ -6,9 +6,7 @@ import javax.lang.model.type.*;
 import javax.tools.JavaFileObject;
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import static java.lang.Character.isUpperCase;
 import static java.lang.Character.toLowerCase;
@@ -24,7 +22,7 @@ import static javax.tools.Diagnostic.Kind.WARNING;
  * Created by alexander on 14.09.14.
  */
 @SupportedSourceVersion(RELEASE_5)
-@SupportedAnnotationTypes({"*"/*,"javax.persistence.*", "org.hibernate.annotations.*"*/})
+@SupportedAnnotationTypes({"*"})
 public class BeanMetadataGenerator extends AbstractProcessor {
     public static final String PREFIX = "P";
     public static final String STATIC_PREFIX = "S";
@@ -35,10 +33,23 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     private String intend = "    ";
     private static final String JAVA_LANG = "javax.metadata";
 
+    String filter = null;
+    private Collection<String> pkgs;
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
         super.init(processingEnv);
+        Map<String, String> options = processingEnv.getOptions();
+        this.filter = options.get("filter");
+        String _tmp = options.get("package");
+        if (_tmp != null) pkgs = Arrays.asList(_tmp.split(","));
+    }
+
+    @Override
+    public Set<String> getSupportedAnnotationTypes() {
+        return (filter != null)
+                ? new HashSet<String>(asList(filter))
+                : super.getSupportedAnnotationTypes();
     }
 
     @Override
@@ -59,8 +70,17 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     }
 
     public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties) {
-        generate(classElement, elements, properties, false);
-        generate(classElement, elements, properties, true);
+        Name qName = classElement.getQualifiedName();
+        if (inPackage(qName)) {
+            generate(classElement, elements, properties, false);
+            generate(classElement, elements, properties, true);
+        }
+    }
+
+    public boolean inPackage(Name qName) {
+        if (pkgs == null) return true;
+        for (String pkg : pkgs) if (qName.toString().startsWith(pkg)) return true;
+        return false;
     }
 
     public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties, boolean isStatic) {
