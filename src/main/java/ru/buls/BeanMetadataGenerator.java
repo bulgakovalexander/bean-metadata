@@ -270,26 +270,30 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             boolean isStatic = modifiers.contains(STATIC);
 
             String mName = childE.getSimpleName().toString();
-            if (!isStatic && isPublic && METHOD == childE.getKind()) {
-                ExecutableElement exec = (ExecutableElement) childE;
-                TypeMirror returnType = exec.getReturnType();
+            if (!isStatic && isPublic && asList(METHOD, FIELD).contains(childE.getKind())) {
+                ExecutableElement exec = childE instanceof ExecutableElement ? (ExecutableElement) childE : null;
+                VariableElement var = (exec != null) ? null : (VariableElement) childE;
+
+                TypeMirror returnType = exec != null ? exec.getReturnType() : var.asType();
                 TypeKind kind = returnType.getKind();
                 String result = null;
 
-                boolean noParams = exec.getParameters().isEmpty();
-                boolean booleanIs = noParams && BOOLEAN == kind && returnType instanceof PrimitiveType
-                        && mName.startsWith("is") && mName.length() > 2
-                        && mName.substring(2, 3).equals(mName.substring(2, 3).toUpperCase());
+                boolean isField = var != null;
+                boolean noParams = isField || exec.getParameters().isEmpty();
+                boolean booleanProperty = noParams && BOOLEAN == kind && returnType instanceof PrimitiveType
+                        && (isField || (mName.startsWith("is") && mName.length() > 2
+                        && mName.substring(2, 3).equals(mName.substring(2, 3).toUpperCase())));
 
-                boolean getter = noParams && mName.startsWith("get") && mName.length() > 3
-                        && mName.substring(3, 4).equals(mName.substring(3, 4).toUpperCase());
+                boolean defaultProperty = noParams && (isField || (mName.startsWith("get") && mName.length() > 3
+                        && mName.substring(3, 4).equals(mName.substring(3, 4).toUpperCase())));
 
-                if (booleanIs) result = decapitalize(mName.substring(2));
-                else if (getter) result = decapitalize(mName.substring(3));
+                if(isField) result = mName;
+                else if (booleanProperty) result = decapitalize(mName.substring(2));
+                else if (defaultProperty) result = decapitalize(mName.substring(3));
 
                 if (result != null) {
                     TypeElement type = null;
-                    if (getter && returnType instanceof DeclaredType) {
+                    if (defaultProperty && returnType instanceof DeclaredType) {
                         DeclaredType dType = (DeclaredType) returnType;
                         Element retElement = dType.asElement();
                         if (elements.contains(retElement)) type = (TypeElement) retElement;
