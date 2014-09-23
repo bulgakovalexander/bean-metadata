@@ -6,10 +6,7 @@ import javax.lang.model.type.*;
 import javax.tools.JavaFileObject;
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import static java.lang.Character.isUpperCase;
 import static java.lang.Character.toLowerCase;
@@ -37,11 +34,15 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     private static final String JAVA_LANG = "javax.metadata";
 
     String filter = null;
+    private Collection<String> pkgs;
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
         super.init(processingEnv);
-        this.filter = processingEnv.getOptions().get("filter");
+        Map<String, String> options = processingEnv.getOptions();
+        this.filter = options.get("filter");
+        String _tmp = options.get("package");
+        if (_tmp != null) pkgs = Arrays.asList(_tmp.split(","));
     }
 
     @Override
@@ -69,8 +70,17 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     }
 
     public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties) {
-        generate(classElement, elements, properties, false);
-        generate(classElement, elements, properties, true);
+        Name qName = classElement.getQualifiedName();
+        if (inPackage(qName)) {
+            generate(classElement, elements, properties, false);
+            generate(classElement, elements, properties, true);
+        }
+    }
+
+    public boolean inPackage(Name qName) {
+        if (pkgs == null) return true;
+        for (String pkg : pkgs) if (qName.toString().startsWith(pkg)) return true;
+        return false;
     }
 
     public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties, boolean isStatic) {
