@@ -83,7 +83,8 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         return false;
     }
 
-    public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties, boolean isStatic) {
+    public void generate(TypeElement classElement, Set<? extends Element> elements,
+                         Map<String, TypeElement> properties, boolean isStatic) {
         Name className = classElement.getSimpleName();
         PackageElement packageElement = (PackageElement) classElement.getEnclosingElement();
         Name pkgName = packageElement.getQualifiedName();
@@ -311,7 +312,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                 else if (booleanProperty) result = decapitalize(mName.substring(2));
                 else if (defaultProperty) result = decapitalize(mName.substring(3));
 
-                if (result != null) {
+                if (result != null && !properties.containsKey(result)) {
                     TypeElement type = null;
                     if (defaultProperty && returnType instanceof DeclaredType) {
                         DeclaredType dType = (DeclaredType) returnType;
