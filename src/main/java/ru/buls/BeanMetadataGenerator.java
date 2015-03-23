@@ -1,13 +1,18 @@
 package ru.buls;
 
+import com.sun.tools.javac.code.Symbol;
+import com.sun.tools.javac.code.Type;
+
 import javax.annotation.processing.*;
 import javax.lang.model.element.*;
 import javax.lang.model.type.*;
 import javax.tools.JavaFileObject;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.util.*;
 
+import static java.lang.Boolean.TRUE;
 import static java.lang.Character.isUpperCase;
 import static java.lang.Character.toLowerCase;
 import static java.util.Arrays.asList;
@@ -25,8 +30,8 @@ import static javax.tools.Diagnostic.Kind.WARNING;
 @SupportedAnnotationTypes({"*"})
 public class BeanMetadataGenerator extends AbstractProcessor {
     public static final String PREFIX = "P";
+    public static final String INTERFACE_PREFIX = "IP";
     public static final String STATIC_PREFIX = "S";
-    private static final String BASE_CLASS = PREFIX + Object.class.getSimpleName();
     private static final String WRAP_METHOD = "w";
     private static final String _PREFIX = "_PREFIX";
     private static final String PARENT = "parent";
@@ -34,15 +39,53 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     private static final String JAVA_LANG = "javax.metadata";
 
     String filter = null;
-    private Collection<String> pkgs;
+    private Collection<String> include;
+    private Collection<String> exclude;
+    private boolean checkSuperclass = false;
+    private String prefix = PREFIX;
+    private String staticPrefix = STATIC_PREFIX;
+    private String interfacePrefix = INTERFACE_PREFIX;
+
+    private Map<String, TypeElement> generated = new HashMap<String, TypeElement>();
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
         super.init(processingEnv);
         Map<String, String> options = processingEnv.getOptions();
         this.filter = options.get("filter");
-        String _tmp = options.get("package");
-        if (_tmp != null) pkgs = Arrays.asList(_tmp.split(","));
+
+        include = getFilter("include", options);
+        exclude = getFilter("exclude", options);
+
+        checkSuperclass = TRUE.toString().equals(options.get("checkSuperclass"));
+
+        prefix = options.get("prefix");
+        if (prefix == null) prefix = PREFIX;
+        staticPrefix = options.get("staticPrefix");
+        if (staticPrefix == null) staticPrefix = STATIC_PREFIX;
+        interfacePrefix = options.get("interfacePrefix");
+        if (interfacePrefix == null) interfacePrefix = INTERFACE_PREFIX;
+    }
+
+    private String getStaticPrefix() {
+        return staticPrefix;
+    }
+
+    private String getInterfacePrefix() {
+        return interfacePrefix;
+    }
+
+    private String getPrefix() {
+        return prefix;
+    }
+
+    private String getFullObjectClassName() {
+        return JAVA_LANG + "." + getObjectClassName();
+    }
+
+    protected Collection<String> getFilter(String filter, Map<String, String> options) {
+        String _tmp = options.get(filter);
+        return (_tmp != null) ? Arrays.asList(_tmp.split(",")) : Collections.<String>emptyList();
     }
 
     @Override
@@ -71,104 +114,255 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
     public void generate(TypeElement classElement, Set<? extends Element> elements, Map<String, TypeElement> properties) {
         Name qName = classElement.getQualifiedName();
-        if (inPackage(qName)) {
+        boolean include = isInclude(classElement);
+        if (include) {
             generate(classElement, elements, properties, false);
             generate(classElement, elements, properties, true);
         }
     }
 
-    public boolean inPackage(Name qName) {
-        if (pkgs == null) return true;
-        for (String pkg : pkgs) if (qName.toString().startsWith(pkg)) return true;
-        return false;
+    public boolean isInclude(TypeElement classElement) {
+        boolean result = isObjectClass(classElement);
+        if (result) return result;
+
+        for (String pkg : include)
+            if (classElement.toString().startsWith(pkg)) {
+                result = true;
+                break;
+            }
+
+        if (result) {
+            for (String pkg : exclude)
+                if (classElement.toString().startsWith(pkg)) {
+                    result = false;
+                    break;
+                }
+            if (!result) warning("class " + classElement.toString() + " is excluded by " + this.exclude);
+        } else warning("class " + classElement.toString() + " is filtered out by " + this.include);
+        return result;
     }
 
     public void generate(TypeElement classElement, Set<? extends Element> elements,
                          Map<String, TypeElement> properties, boolean isStatic) {
+        if (!isStatic /*&& isInterface*/) {
+            generate(classElement, elements, properties, isStatic, true);
+        }
+        generate(classElement, elements, properties, isStatic, false);
+    }
+
+    protected static boolean isInterface(TypeElement classElement) {
+        boolean isInterface = false;
+        if (classElement instanceof Symbol.ClassSymbol) {
+            Symbol.ClassSymbol cs = (Symbol.ClassSymbol) classElement;
+            isInterface = cs.isInterface();
+        }
+        return isInterface;
+    }
+
+    protected void generate(TypeElement classElement, Set<? extends Element> elements,
+                            Map<String, TypeElement> properties, boolean isStatic, boolean isInterface) {
         Name className = classElement.getSimpleName();
         PackageElement packageElement = (PackageElement) classElement.getEnclosingElement();
         Name pkgName = packageElement.getQualifiedName();
         Filer processingEnvFiler = processingEnv.getFiler();
-        String prefix = isStatic ? STATIC_PREFIX : PREFIX;
-        String metadataClassName = prefix + className;
-        BufferedWriter bw = null;
-        try {
-            processingEnv.getMessager().printMessage(WARNING,
-                    "Generating " + pkgName + "." + metadataClassName);
-            JavaFileObject jfo = processingEnvFiler.createSourceFile(pkgName + "." + metadataClassName);
-            bw = new BufferedWriter(jfo.openWriter());
-            bw.append("package ").append(pkgName).append(";");
-            bw.newLine();
 
-            bw.append("import " + JAVA_LANG + "." + BASE_CLASS + ";");
-            bw.newLine();
-            for (TypeElement elem : properties.values())
-                if (elem != null) {
-                    bw.append("import " + qualifiedMetadataName(elem, false) + ";");
-                    bw.newLine();
-                }
+        String prefix = isStatic ? getStaticPrefix() : isInterface ? getInterfacePrefix() : getPrefix();
+        String metadataClassName = prefix + className;
+        BufferedWriter body = null;
+        try {
+            String msg = "Generating " + pkgName + "." + metadataClassName;
+//            warning(msg);
+
+            StringWriter out = new StringWriter();
+            body = new BufferedWriter(out);
+
+            Set<String> imports = new LinkedHashSet<String>();
+
+            imports.add(getFullObjectClassName());
 
             TypeMirror _tmp = classElement.getSuperclass();
             DeclaredType superClass = _tmp instanceof DeclaredType ? (DeclaredType) _tmp : null;
             if (superClass == null && !(_tmp instanceof NoType))
                 throw new IllegalStateException("incompatible base type " + superClass + " for " + classElement);
 
-            bw.newLine();
+            body.newLine();
 
-            bw.append("public class ").append(metadataClassName);
-            bw.append(" extends ");
-//            if (superClass != null) {
-//                TypeElement superElem = (TypeElement) superClass.asElement();
-//                if (elements.contains(superElem)) bw.append(qualifiedMetadataName(superElem, isStatic));
-//                else bw.append(JAVA_LANG + "." + BASE_CLASS);
-//            } else
-            bw.append(JAVA_LANG + "." + BASE_CLASS);
-            bw.append(" {");
-            bw.newLine();
-            if (!isStatic) {
-                bw.append(intend).append("public ").append(metadataClassName)
-                        .append("(String prefix, " + BASE_CLASS + " parent) { super(prefix, parent); }");
-                bw.newLine();
-                bw.append(intend).append("protected ").append(metadataClassName).append("() { super(); }");
-                bw.newLine();
+            body.append("public ").append(isInterface ? "interface" : "class").append(" ").append(metadataClassName);
+
+            boolean implementsListStarted = false;
+            if (superClass != null) {
+
+                TypeElement superElem = (TypeElement) superClass.asElement();
+
+                boolean superInclude = isInclude(superElem);
+                boolean superClassFound = !checkSuperclass || elements.contains(superElem);
+                boolean extend = superInclude && superClassFound && !(isInterface && isObjectClass(superElem));
+                if (extend) {
+                    body.append(" extends ");
+                    String name;
+                    if (isObjectClass(superElem)) imports.add(JAVA_LANG + "." + (name = getObjectClassName()));
+                    else
+                        imports.add(packageName(superElem) + "." + (name = metadataName(superElem, isStatic, isInterface)));
+
+                    body.append(name);
+
+                    implementsListStarted = isInterface;
+                } else if (!isInterface) {
+                    body.append(" extends ");
+                    body.append(getObjectClassName());
+                    imports.add(JAVA_LANG + "." + getObjectClassName());
+                }
+            } else if (!isInterface) {
+                body.append(" extends ");
+                body.append(getObjectClassName());
+                imports.add(JAVA_LANG + "." + getObjectClassName());
             }
 
-            bw.newLine();
+            if (!isStatic) {
+                if (!isInterface) {
+                    String name = getInterfacePrefix() + className;
+                    body.append("\n").append(intend).append(intend)
+                            .append("implements ").append(name);
+                    implementsListStarted = true;
+                }
+
+                List<? extends TypeMirror> interfaces = classElement.getInterfaces();
+                List<Element> iElements = new ArrayList<Element>(interfaces.size());
+                for (TypeMirror i : interfaces) {
+                    Element e = get(i, elements);
+                    if (e != null) iElements.add(e);
+                }
+                if (!iElements.isEmpty()) {
+                    if (!implementsListStarted)
+                        body.append("\n").append(intend).append(intend).append(isInterface ? "extends " : "implements ");
+                    boolean first = !implementsListStarted;
+                    for (Element i : iElements) {
+                        Name iName = i.getSimpleName();
+                        PackageElement iPgk = (PackageElement) i.getEnclosingElement();
+                        Name iPgkName = iPgk.getQualifiedName();
+                        if (!first) body.append(",\n").append(intend).append(intend);
+
+                        String name = getInterfacePrefix() + iName.toString();
+                        imports.add(iPgkName.toString() + "." + name);
+                        body.append(name);
+                        first = false;
+                    }
+                }
+            }
+            body.append(" {");
+            body.newLine();
+            if (!(isStatic || isInterface)) {
+                body.append(intend).append("public ").append(metadataClassName)
+                        .append("(String prefix, " + getObjectClassName() + " parent) { super(prefix, parent); }");
+                body.newLine();
+                body.append(intend).append("protected ").append(metadataClassName).append("() { super(); }");
+                body.newLine();
+            }
+
+            body.newLine();
             for (String result : properties.keySet()) {
                 TypeElement elem = properties.get(result);
 
                 if (elem != null) {
-                    String type = metadataName(elem, false);
-                    String _method = type + " " + result + "() { return " + " new " + type + "(\"" + result + "\", "
-                            + (isStatic ? "null" : "this") + "); }";
-                    bw.append(intend).append("public ");
-                    if (isStatic) bw.append("static ");
-                    bw.append(_method);
-                    bw.newLine();
+                    String newObjType = metadataName(elem, false, false);
+                    String returnObjType = metadataName(elem, false, isInterface(elem));
+                    String packageName = packageName(elem);
+                    imports.add(packageName + "." + newObjType);
+                    imports.add(packageName + "." + returnObjType);
+                    String _method = returnObjType + " " + result + "()";
+                    body.append(intend);
+                    if (!isInterface) {
+                        _method += " { return " + " new " + newObjType + "(\"" + result + "\", "
+                                + (isStatic ? "null" : "this") + "); }";
+                        body.append("public ");
+                        if (isStatic) body.append("static ");
+                    }
+                    body.append(_method);
+                    if (isInterface) body.append(";");
+                    body.newLine();
                 }
-                String _prop = "String " + result + " = " + w(result, !isStatic) + ";";
-                bw.append(intend).append("public final ");
-                if (isStatic) bw.append("static ");
-                bw.append(_prop);
-                bw.newLine();
+                if (!isInterface) {
+                    String _prop = "String " + result + " = " + w(result, !(isStatic || isInterface)) + ";";
+                    body.append(intend).append("public final ");
+                    if (isStatic) body.append("static ");
+                    body.append(_prop);
+                    body.newLine();
+                }
             }
 
 //            if (!isStatic) bw.append(intend).append("public static final ")
 //                    .append(metadataClassName).append(" ").append(onlyUps(className.toString()).toLowerCase())
 //                    .append(" = new ").append(metadataClassName).append("();");
 
-            bw.newLine();
-            bw.append("}");
+            body.newLine();
+            body.append("}");
+
+            JavaFileObject jfo = processingEnvFiler.createSourceFile(pkgName + "." + metadataClassName);
+            BufferedWriter result = new BufferedWriter(jfo.openWriter());
+
+            result.append("package ").append(pkgName).append(";");
+            result.newLine();
+
+            if(!imports.isEmpty()) result.newLine();
+            for (String imp : imports) {
+                result.append("import ").append(imp).append(";");
+                result.newLine();
+            }
+            if(!imports.isEmpty()) result.newLine();
+
+            body.flush();
+            result.append(out.getBuffer().toString());
+            body.close();
+
+            result.flush();
+            generated.put(pkgName.toString() + "." + className.toString(), classElement);
 
         } catch (IOException e1) {
             throw new RuntimeException(e1);
         } finally {
-            if (bw != null) try {
-                bw.close();
+            if (body != null) try {
+                body.close();
             } catch (IOException e1) {
                 e1.printStackTrace();
             }
         }
+    }
+
+    private String getObjectClassName() {
+        return PREFIX + Object.class.getSimpleName();
+    }
+
+    private void warning(String msg) {
+        Messager messager = processingEnv.getMessager();
+        messager.printMessage(WARNING, msg);
+    }
+
+    private Element get(TypeMirror what, Set<? extends Element> where) {
+        Element result = null;
+        Symbol.TypeSymbol whatSymbol = toSymbol(what);
+
+        if (where.contains(whatSymbol)) {
+            result = whatSymbol;
+        }
+//        for (Element e : where) {
+//            System.out.println(
+//                    e.toString() + ", " + e.asType() + ", " + what);
+//            if (e.equals(whatSymbol)) {
+//                System.out.println(
+//                        e.toString() + " as " + e.asType() + " equals to " + what);
+//                result = e;
+//                break;
+//            } else {
+//                System.out.println(
+//                        e.toString() + " as " + e.asType() + " not equals to " + what);
+//            }
+//
+//        }
+        return result;
+    }
+
+    private static Symbol.TypeSymbol toSymbol(TypeMirror what) {
+        return ((Type.ClassType) what).asElement();
     }
 
     private String w(String result, boolean wrap) {
@@ -183,13 +377,12 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     }
 
     public void generateBaseClass() {
-        String metadataClassName = BASE_CLASS;
+        String metadataClassName = getObjectClassName();
         String qualifiedBaseClass = JAVA_LANG + "." + metadataClassName;
         Filer processingEnvFiler = processingEnv.getFiler();
         BufferedWriter bw = null;
 
-        processingEnv.getMessager().printMessage(WARNING,
-                "Generating " + qualifiedBaseClass);
+        warning("Generating " + qualifiedBaseClass);
 
         try {
             JavaFileObject jfo = processingEnvFiler.createSourceFile(qualifiedBaseClass);
@@ -253,12 +446,21 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         }
     }
 
-    public String metadataName(TypeElement elem, boolean isStatic) {
-        return (isStatic ? STATIC_PREFIX : PREFIX) + elem.getSimpleName().toString();
+    public String metadataName(TypeElement elem, boolean isStatic, boolean isInterface) {
+        return (isStatic ? getStaticPrefix() : isInterface ? getInterfacePrefix() : getPrefix()) + elem.getSimpleName().toString();
     }
 
-    public String qualifiedMetadataName(TypeElement elem, boolean isStatic) {
-        return packageName(elem) + "." + metadataName(elem, isStatic);
+    public String qualifiedMetadataName(TypeElement elem, boolean isStatic, boolean isInterface) {
+        if (isObjectClass(elem)) return getFullObjectClassName();
+        else return packageName(elem) + "." + metadataName(elem, isStatic, isInterface);
+    }
+
+    protected static boolean isObjectClass(TypeElement elem) {
+        return isObjectClass(elem.asType());
+    }
+
+    protected static boolean isObjectClass(TypeMirror type) {
+        return type.toString().equals(Object.class.getName());
     }
 
     public String packageName(TypeElement elem) {
@@ -268,19 +470,41 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     }
 
     public static Map<String, TypeElement> properties(TypeElement e, Set<? extends Element> elements) {
-        Map<String, TypeElement> properties = new LinkedHashMap<String, TypeElement>();
-        populate(properties, e, elements);
-        TypeMirror sup = e.getSuperclass();
-        while (sup instanceof DeclaredType) {
-            DeclaredType sdt = (DeclaredType) sup;
-            Element superE = sdt.asElement();
-            if (superE != null && superE instanceof TypeElement
-                    && !((TypeElement) superE).getQualifiedName().toString().equals(Object.class.getName())) {
-                populate(properties, (TypeElement) superE, elements);
-                sup = ((TypeElement) superE).getSuperclass();
-            } else sup = null;
+
+        Map<String, TypeElement> fromIfaces = new LinkedHashMap<String, TypeElement>();
+        //if (isInterface(e)) {
+        List<? extends TypeMirror> interfaces = e.getInterfaces();
+        for (TypeMirror i : interfaces) {
+            addFromType(i, fromIfaces, elements, false);
         }
-        return properties;
+        //}
+
+        Map<String, TypeElement> fromSuperClass = new LinkedHashMap<String, TypeElement>();
+
+        addFromType(e.getSuperclass(), fromSuperClass, elements, true);
+        Map<String, TypeElement> fromSelf = new LinkedHashMap<String, TypeElement>();
+        addFromType(e.asType(), fromSelf, elements, false);
+
+        for (String property : fromSelf.keySet()) fromIfaces.remove(property);
+        for (String property : fromSuperClass.keySet()) fromIfaces.remove(property);
+
+        LinkedHashMap<String, TypeElement> result = new LinkedHashMap<String, TypeElement>();
+        result.putAll(fromIfaces);
+        result.putAll(fromSelf);
+        return result;
+    }
+
+
+    static void addFromType(TypeMirror type, Map<String, TypeElement> properties, Set<? extends Element> elements, boolean superclass) {
+        while (type instanceof DeclaredType) {
+            DeclaredType sdt = (DeclaredType) type;
+            Element element = sdt.asElement();
+            if (element != null && element instanceof TypeElement
+                    && !((TypeElement) element).getQualifiedName().toString().equals(Object.class.getName())) {
+                populate(properties, (TypeElement) element, elements);
+                type = superclass ? ((TypeElement) element).getSuperclass() : null;
+            } else type = null;
+        }
     }
 
     public static void populate(Map<String, TypeElement> properties, TypeElement byElement, Set<? extends Element> elements) {
@@ -308,7 +532,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                 boolean defaultProperty = noParams && (isField || (mName.startsWith("get") && mName.length() > 3
                         && mName.substring(3, 4).equals(mName.substring(3, 4).toUpperCase())));
 
-                if(isField) result = mName;
+                if (isField) result = mName;
                 else if (booleanProperty) result = decapitalize(mName.substring(2));
                 else if (defaultProperty) result = decapitalize(mName.substring(3));
 
