@@ -85,6 +85,18 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
     public void generate(TypeElement classElement, Set<? extends Element> elements,
                          Map<String, TypeElement> properties, boolean isStatic) {
+        if (!isStatic /*&& isInterface*/) {
+            generate(classElement, elements, properties, isStatic, true);
+        }
+        generate(classElement, elements, properties, isStatic, false);
+    }
+
+    protected static boolean isInterface(TypeElement classElement) {
+        return ElementKind.INTERFACE.equals(classElement.getKind());
+    }
+
+    protected void generate(TypeElement classElement, Set<? extends Element> elements,
+                            Map<String, TypeElement> properties, boolean isStatic, boolean isInterface) {
         Name className = classElement.getSimpleName();
         PackageElement packageElement = (PackageElement) classElement.getEnclosingElement();
         Name pkgName = packageElement.getQualifiedName();
@@ -170,6 +182,49 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             }
         }
     }
+
+    private String getObjectClassName() {
+        return PREFIX + Object.class.getSimpleName();
+    }
+
+    private void warning(String msg) {
+        Messager messager = processingEnv.getMessager();
+        messager.printMessage(WARNING, msg);
+    }
+
+    private Element get(TypeMirror what, Set<? extends Element> where) {
+        Element result = null;
+        if(what instanceof DeclaredType) {
+            Element whatElem;
+            DeclaredType dt = (DeclaredType) what;
+            whatElem = dt.asElement();
+
+            if (where.contains(whatElem)) {
+                result = whatElem;
+            }
+        }
+
+
+//        for (Element e : where) {
+//            System.out.println(
+//                    e.toString() + ", " + e.asType() + ", " + what);
+//            if (e.equals(what)) {
+//                System.out.println(
+//                        e.toString() + " as " + e.asType() + " equals to " + what);
+//                result = e;
+//                break;
+//            } else {
+//                System.out.println(
+//                        e.toString() + " as " + e.asType() + " not equals to " + what);
+//            }
+//
+//        }
+        return result;
+    }
+
+//    private static Symbol.TypeSymbol toSymbol(TypeMirror what) {
+//        return ((Type.ClassType) what).asElement();
+//    }
 
     private String w(String result, boolean wrap) {
         return wrap ? WRAP_METHOD + "(\"" + result + "\")" : "\"" + result + "\"";
