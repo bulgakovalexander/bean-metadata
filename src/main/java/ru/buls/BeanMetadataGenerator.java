@@ -1,7 +1,5 @@
 package ru.buls;
 
-import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Type;
 
 import javax.annotation.processing.*;
 import javax.lang.model.element.*;
@@ -151,12 +149,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
     }
 
     protected static boolean isInterface(TypeElement classElement) {
-        boolean isInterface = false;
-        if (classElement instanceof Symbol.ClassSymbol) {
-            Symbol.ClassSymbol cs = (Symbol.ClassSymbol) classElement;
-            isInterface = cs.isInterface();
-        }
-        return isInterface;
+        return ElementKind.INTERFACE.equals(classElement.getKind());
     }
 
     protected void generate(TypeElement classElement, Set<? extends Element> elements,
@@ -339,15 +332,21 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
     private Element get(TypeMirror what, Set<? extends Element> where) {
         Element result = null;
-        Symbol.TypeSymbol whatSymbol = toSymbol(what);
+        if(what instanceof DeclaredType) {
+            Element whatElem;
+            DeclaredType dt = (DeclaredType) what;
+            whatElem = dt.asElement();
 
-        if (where.contains(whatSymbol)) {
-            result = whatSymbol;
+            if (where.contains(whatElem)) {
+                result = whatElem;
+            }
         }
+
+
 //        for (Element e : where) {
 //            System.out.println(
 //                    e.toString() + ", " + e.asType() + ", " + what);
-//            if (e.equals(whatSymbol)) {
+//            if (e.equals(what)) {
 //                System.out.println(
 //                        e.toString() + " as " + e.asType() + " equals to " + what);
 //                result = e;
@@ -361,9 +360,9 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         return result;
     }
 
-    private static Symbol.TypeSymbol toSymbol(TypeMirror what) {
-        return ((Type.ClassType) what).asElement();
-    }
+//    private static Symbol.TypeSymbol toSymbol(TypeMirror what) {
+//        return ((Type.ClassType) what).asElement();
+//    }
 
     private String w(String result, boolean wrap) {
         return wrap ? WRAP_METHOD + "(\"" + result + "\")" : "\"" + result + "\"";
