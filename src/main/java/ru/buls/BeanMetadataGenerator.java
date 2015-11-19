@@ -244,6 +244,19 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             }
             body.append(" {");
             body.newLine();
+
+//            String staticVarName = null;
+//            if (isStatic) {
+//                //для статика генерим переменнную основного типа
+//                String baseName = className.toString();
+//                String varClass = getPrefix() + baseName;
+//                staticVarName = "_" + staticVarName(baseName);
+//                body.append(intend).append("public static final ").append(varClass).append(" ").append(staticVarName).append(" = ")
+//                        .append(newObjectCode(varClass));
+//                body.newLine();
+//            }
+
+
             if (!(isStatic || isInterface)) {
                 body.append(intend).append("public ").append(metadataClassName)
                         .append("(String prefix, " + getObjectClassName() + " parent) { super(prefix, parent); }");
@@ -253,8 +266,9 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             }
 
             body.newLine();
-            for (String result : properties.keySet()) {
-                TypeElement elem = properties.get(result);
+            for (String property : properties.keySet()) {
+                TypeElement elem = properties.get(property);
+
 
                 if (elem != null) {
                     String newObjType = metadataName(elem, false, false);
@@ -262,11 +276,10 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                     String packageName = packageName(elem);
                     imports.add(packageName + "." + newObjType);
                     imports.add(packageName + "." + returnObjType);
-                    String _method = returnObjType + " " + result + "()";
+                    String _method = returnObjType + " " + property + "()";
                     body.append(intend);
                     if (!isInterface) {
-                        _method += " { return " + " new " + newObjType + "(\"" + result + "\", "
-                                + (isStatic ? "null" : "this") + "); }";
+                        _method += " { return " + newObjectCode(newObjType, property, isStatic, className) + " }";
                         body.append("public ");
                         if (isStatic) body.append("static ");
                     }
@@ -275,7 +288,11 @@ public class BeanMetadataGenerator extends AbstractProcessor {
                     body.newLine();
                 }
                 if (!isInterface) {
-                    String _prop = "String " + result + " = " + w(result, !(isStatic || isInterface)) + ";";
+                    String statField = statField(className, property);
+                    String wrapped = WRAP_METHOD + "(" + statField + ")";
+                    String stat = "\"" + property + "\"";
+                    String porpBody = isStatic ? stat : wrapped;
+                    String _prop = "String " + property + " = " + porpBody + ";";
                     body.append(intend).append("public final ");
                     if (isStatic) body.append("static ");
                     body.append(_prop);
@@ -296,12 +313,12 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             result.append("package ").append(pkgName).append(";");
             result.newLine();
 
-            if(!imports.isEmpty()) result.newLine();
+            if (!imports.isEmpty()) result.newLine();
             for (String imp : imports) {
                 result.append("import ").append(imp).append(";");
                 result.newLine();
             }
-            if(!imports.isEmpty()) result.newLine();
+            if (!imports.isEmpty()) result.newLine();
 
             body.flush();
             result.append(out.getBuffer().toString());
@@ -321,6 +338,27 @@ public class BeanMetadataGenerator extends AbstractProcessor {
         }
     }
 
+    private String statField(Name className, String property) {
+        return getStaticPrefix() + className + "." + property;
+    }
+
+    private String staticVarName(String baseName) {
+        StringBuilder result = new StringBuilder();
+        for (char c : baseName.toCharArray()) if (isUpperCase(c)) result.append(c);
+        return result.toString();
+    }
+
+    private String newObjectCode(String className, String property, boolean isStatic, Name delegateClass) {
+        String nameArg = isStatic ? /*ссылка на свою же переменную*/ property : statField(delegateClass, property);
+        String constructor = "(" + nameArg + ", "
+                + (isStatic ? "null" : "this") + ");";
+        return "new " + className + constructor;
+    }
+
+    private String newObjectCode(String className) {
+        return "new " + className + "();";
+    }
+
     private String getObjectClassName() {
         return PREFIX + Object.class.getSimpleName();
     }
@@ -332,7 +370,7 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 
     private Element get(TypeMirror what, Set<? extends Element> where) {
         Element result = null;
-        if(what instanceof DeclaredType) {
+        if (what instanceof DeclaredType) {
             Element whatElem;
             DeclaredType dt = (DeclaredType) what;
             whatElem = dt.asElement();
@@ -364,14 +402,10 @@ public class BeanMetadataGenerator extends AbstractProcessor {
 //        return ((Type.ClassType) what).asElement();
 //    }
 
-    private String w(String result, boolean wrap) {
-        return wrap ? WRAP_METHOD + "(\"" + result + "\")" : "\"" + result + "\"";
-    }
-
     private String onlyUps(String className) {
         StringBuilder builder = new StringBuilder();
         for (char c : className.toCharArray())
-            if (Character.isUpperCase(c)) builder.append(c);
+            if (isUpperCase(c)) builder.append(c);
         return builder.length() != 0 ? builder.toString() : className;
     }
 
@@ -426,11 +460,11 @@ public class BeanMetadataGenerator extends AbstractProcessor {
             bw.append("    public final String w(String propName) {\n" +
                     "        PObject parent = this.parent;\n" +
                     "        StringBuilder prnt = new StringBuilder();\n" +
-                    "        while (parent != null) {\n" +
+                    "        while (parent != null && " + "!(parent._PREFIX == null || parent._PREFIX.isEmpty())" + ") {\n" +
                     "            prnt.append(parent._PREFIX).append(\".\");\n" +
                     "            parent = parent.parent;\n" +
                     "        }\n" +
-                    "        return prnt.toString() + (_PREFIX != null ? _PREFIX + \".\" + propName : propName);\n" +
+                    "        return prnt.toString() + (" + "!(_PREFIX == null || _PREFIX.isEmpty())" + " ? _PREFIX + \".\" + propName : propName);\n" +
                     "    }");
             bw.newLine();
             bw.append("}");
